@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mcp-audit"
+version = "0.1.0"
+description = "Static-analysis security audit for Python MCP server packages. Produces a Carlos-style capability map + risk findings without running the code."
+requires-python = ">=3.10"
+authors = [{name = "Brady Landry"}]
+license = {text = "MIT"}
+readme = "README.md"
+keywords = ["mcp", "model-context-protocol", "security", "audit", "static-analysis"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Security",
+    "Topic :: Software Development :: Quality Assurance",
+]
+# No runtime deps. Pure stdlib (ast, json, pathlib, argparse, tomllib).
+# Intentional — an audit tool with deps you don't recognize is a bad joke.
+dependencies = []
+
+[project.optional-dependencies]
+test = ["pytest>=7"]
+
+[project.scripts]
+mcp-audit = "audit.cli:main"
+
+[project.urls]
+Repository = "https://github.com/bradylandry/mcp-audit"
+
+[tool.setuptools.packages.find]
+include = ["audit*"]

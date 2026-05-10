@@ -1,0 +1,4 @@
+[project]
+name = "clean-mcp-fixture"
+version = "0.1.0"
+dependencies = ["requests>=2.28"]
