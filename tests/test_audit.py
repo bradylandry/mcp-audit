@@ -274,6 +274,79 @@ class TestDynamicExec:
         assert r.dynamic_exec_calls == []
 
 
+class TestUnsafeDeserialization:
+    """Dimension 10 — flag pickle.load, yaml.load (without SafeLoader),
+    marshal.loads, dill.loads, cloudpickle.loads, shelve.open."""
+
+    def test_pickle_loads_detected(self):
+        r = _ast_scan_str(
+            "import pickle\n"
+            "x = pickle.loads(data)\n"
+        )
+        assert len(r.unsafe_deserialization_calls) == 1
+
+    def test_marshal_loads_detected(self):
+        r = _ast_scan_str(
+            "import marshal\n"
+            "x = marshal.loads(data)\n"
+        )
+        assert len(r.unsafe_deserialization_calls) == 1
+
+    def test_yaml_load_without_loader_flagged(self):
+        r = _ast_scan_str(
+            "import yaml\n"
+            "x = yaml.load(text)\n"
+        )
+        assert len(r.unsafe_deserialization_calls) == 1
+
+    def test_yaml_load_with_safeloader_NOT_flagged(self):
+        r = _ast_scan_str(
+            "import yaml\n"
+            "x = yaml.load(text, Loader=yaml.SafeLoader)\n"
+        )
+        assert r.unsafe_deserialization_calls == []
+
+    def test_yaml_unsafe_load_flagged(self):
+        r = _ast_scan_str(
+            "import yaml\n"
+            "x = yaml.unsafe_load(text)\n"
+        )
+        assert len(r.unsafe_deserialization_calls) == 1
+
+    def test_cloudpickle_loads_detected(self):
+        r = _ast_scan_str(
+            "import cloudpickle\n"
+            "x = cloudpickle.loads(data)\n"
+        )
+        assert len(r.unsafe_deserialization_calls) == 1
+
+
+class TestTestDirectoryExclusion:
+    """Issue #1 from external audit — scan() must exclude tests/, fixtures/,
+    examples/ by default, otherwise the tool's score on its own repo is
+    polluted by deliberately-bad fixtures."""
+
+    def test_repo_self_audit_score_is_high(self):
+        # Audit mcp-audit on itself. With the test-fixture exclusion fixed,
+        # this should be high (clean) — it was 0 before the fix because
+        # tests/fixtures/bad_mcp/ was being included.
+        report = build_report(scan(REPO_ROOT))
+        assert report.score >= 8, (
+            f"mcp-audit's own repo scored {report.score}. Test-fixture "
+            f"exclusion is broken — fixtures are being attributed to the "
+            f"package. Findings: {[f.title for f in report.findings]}"
+        )
+
+    def test_include_tests_overrides(self):
+        # When --include-tests is set, the bad fixtures are visible again
+        report = build_report(scan(REPO_ROOT, include_tests=True))
+        # Now the bad_mcp fixture pollutes — score should be low
+        assert report.score <= 5, (
+            f"With include_tests=True, scan should pick up the bad fixture "
+            f"and produce a low score. Got {report.score}."
+        )
+
+
 class TestStringContentSafety:
     """Dimension 9 — flag zero-width unicode + prompt-injection patterns
     in long string literals (common targets: tool descriptions, prompts)."""
@@ -346,7 +419,7 @@ class TestCli:
     def test_score_only_clean(self):
         result = subprocess.run(
             [sys.executable, "-m", "audit.cli", str(CLEAN_FIXTURE), "--score-only"],
-            capture_output=True, text=True, cwd=REPO_ROOT,
+            capture_output=True, text=True, encoding="utf-8", cwd=REPO_ROOT,
         )
         assert result.returncode == 0
         score = int(result.stdout.strip())
@@ -355,7 +428,7 @@ class TestCli:
     def test_score_only_bad(self):
         result = subprocess.run(
             [sys.executable, "-m", "audit.cli", str(BAD_FIXTURE), "--score-only"],
-            capture_output=True, text=True, cwd=REPO_ROOT,
+            capture_output=True, text=True, encoding="utf-8", cwd=REPO_ROOT,
         )
         assert result.returncode == 0
         assert result.stdout.strip() == "0"
@@ -363,17 +436,34 @@ class TestCli:
     def test_json_output_parses(self):
         result = subprocess.run(
             [sys.executable, "-m", "audit.cli", str(CLEAN_FIXTURE), "--json"],
-            capture_output=True, text=True, cwd=REPO_ROOT,
+            capture_output=True, text=True, encoding="utf-8", cwd=REPO_ROOT,
         )
         assert result.returncode == 0
         data = json.loads(result.stdout)
         assert "files_scanned" in data
         assert "hosts" in data
 
+    def test_json_report_includes_score_and_findings(self):
+        # Issue #3 from external audit — --json was raw scan only;
+        # programmatic CI consumers need score + findings in JSON form.
+        # The --json-report flag emits the full AuditReport.
+        result = subprocess.run(
+            [sys.executable, "-m", "audit.cli", str(CLEAN_FIXTURE), "--json-report"],
+            capture_output=True, text=True, encoding="utf-8", cwd=REPO_ROOT,
+        )
+        assert result.returncode == 0
+        data = json.loads(result.stdout)
+        assert "score" in data
+        assert isinstance(data["score"], int)
+        assert "findings" in data
+        assert "capabilities_yes" in data
+        assert "capabilities_no" in data
+        assert "scan_summary" in data
+
     def test_markdown_output_has_score_line(self):
         result = subprocess.run(
             [sys.executable, "-m", "audit.cli", str(CLEAN_FIXTURE)],
-            capture_output=True, text=True, cwd=REPO_ROOT,
+            capture_output=True, text=True, encoding="utf-8", cwd=REPO_ROOT,
         )
         assert result.returncode == 0
         assert "## Score:" in result.stdout
@@ -382,7 +472,7 @@ class TestCli:
     def test_nonexistent_target_exits_2(self):
         result = subprocess.run(
             [sys.executable, "-m", "audit.cli", "/path/that/does/not/exist"],
-            capture_output=True, text=True, cwd=REPO_ROOT,
+            capture_output=True, text=True, encoding="utf-8", cwd=REPO_ROOT,
         )
         assert result.returncode == 2
 

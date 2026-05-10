@@ -1,6 +1,6 @@
 # Security Audit: jarvis-trading-mcp
 
-- **Generated:** 2026-05-10 16:23:14 UTC
+- **Generated:** 2026-05-10 16:39:58 UTC
 - **Tool:** mcp-audit v0.1.0
 - **Source:** `/Users/blandry/Documents/Automation/github/jarvis-trading-mcp`
 - **Files scanned:** 2 (413 lines)
@@ -23,6 +23,7 @@
 - ❌ No filesystem writes detected (no open(..., 'w'/'a'), no os.remove, no shutil writes, no Path.write_text)
 - ❌ No filesystem reads detected
 - ❌ No inbound network listener (stdio only)
+- ❌ No unsafe deserialization (no pickle.load, no yaml.load without SafeLoader, no marshal.loads, no dill/cloudpickle)
 
 ## Dependencies
 

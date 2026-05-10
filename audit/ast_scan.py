@@ -63,6 +63,28 @@ _SUBPROCESS_FUNCS = {
 
 _DYNAMIC_EXEC_FUNCS = {"eval", "exec", "compile", "__import__"}
 
+# Dimension 10 — unsafe deserialization sinks. These all execute
+# arbitrary code when handed attacker-controlled bytes:
+#   - pickle.load / pickle.loads / pickle.Unpickler — full ACE
+#   - marshal.loads / marshal.load — same, less commonly used in MCPs
+#   - yaml.load / yaml.unsafe_load — ACE unless Loader=SafeLoader is
+#     explicitly passed (we can't statically prove "SafeLoader is
+#     passed for this call site" cleanly without flow analysis, so
+#     we flag yaml.load and let the reviewer verify)
+#   - dill.loads / cloudpickle.loads — pickle alternatives, same risk
+#   - shelve.open — uses pickle under the hood
+# Added 2026-05-10 after external auditor flagged "no deserialization
+# detection" as a missing audit gap.
+_UNSAFE_DESERIALIZATION_FUNCS = {
+    "pickle.load", "pickle.loads", "pickle.Unpickler",
+    "cPickle.load", "cPickle.loads",
+    "marshal.load", "marshal.loads",
+    "yaml.load", "yaml.unsafe_load",
+    "dill.load", "dill.loads",
+    "cloudpickle.load", "cloudpickle.loads",
+    "shelve.open",
+}
+
 _FS_WRITE_FUNCS = {
     "os.remove", "os.unlink", "os.rmdir", "os.removedirs", "os.rename",
     "os.renames", "os.replace", "os.mkdir", "os.makedirs", "os.chmod",
@@ -206,6 +228,9 @@ class ScanResult:
     zero_width_strings: list[CallSite] = field(default_factory=list)
     injection_pattern_strings: list[CallSite] = field(default_factory=list)
 
+    # Dimension 10 — unsafe deserialization sinks
+    unsafe_deserialization_calls: list[CallSite] = field(default_factory=list)
+
 
 # ── AST helpers ─────────────────────────────────────────────────────────────
 
@@ -298,6 +323,23 @@ class _Scanner(ast.NodeVisitor):
         if bare in _DYNAMIC_EXEC_FUNCS and "." not in name:
             # Only flag bare builtins, not e.g. `something.eval`
             self.r.dynamic_exec_calls.append(self._site(node, bare))
+
+        # Unsafe deserialization sinks
+        if name in _UNSAFE_DESERIALIZATION_FUNCS:
+            # For yaml.load specifically, check if Loader= is passed and
+            # is yaml.SafeLoader / SafeLoader. If so, skip — that's safe.
+            if name in ("yaml.load",):
+                loader_kw = _get_kwarg_value(node, "Loader")
+                if loader_kw is not None:
+                    loader_name = _dotted_name(loader_kw)
+                    safe_loaders = {"yaml.SafeLoader", "SafeLoader",
+                                    "yaml.CSafeLoader", "CSafeLoader",
+                                    "yaml.BaseLoader", "BaseLoader"}
+                    if loader_name in safe_loaders:
+                        # Safe — don't flag
+                        self.generic_visit(node)
+                        return
+            self.r.unsafe_deserialization_calls.append(self._site(node, name))
 
         # Subprocess / shell
         if name in _SUBPROCESS_FUNCS or any(name.endswith("." + sp.split(".")[-1]) for sp in _SUBPROCESS_FUNCS if sp.startswith("subprocess")):
@@ -522,15 +564,72 @@ def _parse_deps(target: Path) -> tuple[list[str], str]:
 
 # ── Public API ──────────────────────────────────────────────────────────────
 
-def scan(target_path: str | Path) -> ScanResult:
-    """Walk every .py file under target_path. Returns a ScanResult."""
+# Directory names whose contents are NOT part of the audited package
+# itself — they're test fixtures, example code, build artifacts, etc.
+# Including them in the scan attributes their (often deliberately bad)
+# behavior to the package and silently breaks the tool's contract on
+# any real-world repo. Override via --include-tests on the CLI.
+# (Bug found 2026-05-10 by external auditor: running mcp-audit on its
+# own repo returned 0/10 because tests/fixtures/bad_mcp violates every
+# dimension on purpose.)
+_DEFAULT_EXCLUDE_DIRS = frozenset({
+    "tests", "test", "__tests__",
+    "fixtures", "fixture", "_fixtures",
+    "examples", "example", "_examples",
+    "build", "dist", "node_modules",
+    "__pycache__", ".pytest_cache", ".tox", ".venv", "venv", "env",
+    ".git",
+})
+
+# File-name patterns whose contents are tests rather than package code.
+# Same exclusion logic — these often deliberately violate the dimensions
+# under test.
+_DEFAULT_EXCLUDE_FILE_PATTERNS = (
+    re.compile(r"^test_.*\.py$"),
+    re.compile(r"^.*_test\.py$"),
+    re.compile(r"^conftest\.py$"),
+)
+
+
+def _is_excluded(rel_path: Path, include_tests: bool) -> bool:
+    """Should this .py file be skipped by default scan logic?"""
+    if include_tests:
+        return False
+    # Any path component matching an excluded directory name → skip
+    for part in rel_path.parts:
+        if part in _DEFAULT_EXCLUDE_DIRS:
+            return True
+    # File-name patterns
+    name = rel_path.name
+    return any(pat.match(name) for pat in _DEFAULT_EXCLUDE_FILE_PATTERNS)
+
+
+def scan(target_path: str | Path, include_tests: bool = False) -> ScanResult:
+    """Walk every .py file under target_path. Returns a ScanResult.
+
+    By default, excludes common test/fixture/example directories from the
+    scan. The audited package's own test fixtures often deliberately
+    violate dimensions under test (e.g., a `bad_mcp/` fixture might
+    intentionally call subprocess + eval). Including them attributes
+    that bad behavior to the package itself and breaks the tool's
+    contract. Pass include_tests=True to scan everything.
+    """
     target = Path(target_path).resolve()
     result = ScanResult(target_path=str(target))
 
     if target.is_file() and target.suffix == ".py":
         py_files = [target]
     elif target.is_dir():
-        py_files = sorted(p for p in target.rglob("*.py") if "__pycache__" not in p.parts)
+        all_py = sorted(target.rglob("*.py"))
+        py_files = []
+        for p in all_py:
+            try:
+                rel = p.relative_to(target)
+            except ValueError:
+                continue
+            if _is_excluded(rel, include_tests):
+                continue
+            py_files.append(p)
     else:
         raise ValueError(f"target_path must be a .py file or directory: {target}")
 
@@ -556,9 +655,9 @@ def scan(target_path: str | Path) -> ScanResult:
     return result
 
 
-def scan_to_json(target_path: str | Path) -> str:
+def scan_to_json(target_path: str | Path, include_tests: bool = False) -> str:
     """Convenience: scan + dump as JSON."""
-    r = scan(target_path)
+    r = scan(target_path, include_tests=include_tests)
     payload = {
         "target_path": r.target_path,
         "files_scanned": r.files_scanned,
@@ -580,6 +679,7 @@ def scan_to_json(target_path: str | Path) -> str:
         "dep_source": r.dep_source,
         "zero_width_strings": [_call_dict(c) for c in r.zero_width_strings],
         "injection_pattern_strings": [_call_dict(c) for c in r.injection_pattern_strings],
+        "unsafe_deserialization_calls": [_call_dict(c) for c in r.unsafe_deserialization_calls],
     }
     return json.dumps(payload, indent=2)
 
