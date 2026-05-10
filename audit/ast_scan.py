@@ -104,6 +104,54 @@ _INBOUND_FUNCS = {
 _URL_HOST_RE = re.compile(r"https?://([^/:?#\s'\"]+)", re.I)
 
 
+# Dimension 9 — string-content safety (tool descriptions, prompts, etc.)
+#
+# Added 2026-05-10 after a manual auditor flagged that mcp-audit was
+# missing checks an experienced reviewer does naturally: scan tool
+# descriptions for hidden instructions, zero-width unicode, and
+# prompt-injection patterns. Pure regex + char-set detection — no LLM.
+#
+# Strategy: walk every string literal ≥ MIN_STR_LEN chars long, flag
+# matches. False positives are possible (a doc string about prompt
+# injection would match) but the rate is low enough to be acceptable
+# v0.1; reviewer can verify each flagged site by inspection.
+
+_ZERO_WIDTH_CHARS = (
+    "​"  # ZERO WIDTH SPACE
+    "‌"  # ZERO WIDTH NON-JOINER
+    "‍"  # ZERO WIDTH JOINER
+    "⁠"  # WORD JOINER
+    "﻿"  # ZERO WIDTH NO-BREAK SPACE / BOM
+    "‪"  # LEFT-TO-RIGHT EMBEDDING
+    "‫"  # RIGHT-TO-LEFT EMBEDDING
+    "‬"  # POP DIRECTIONAL FORMATTING
+    "‭"  # LEFT-TO-RIGHT OVERRIDE
+    "‮"  # RIGHT-TO-LEFT OVERRIDE
+)
+
+# Patterns that look like attempted prompt-injection inside what should
+# be neutral metadata (tool descriptions, config strings). These are
+# common jailbreak fragments — none of them have a legitimate place in
+# a tool description.
+_INJECTION_PATTERNS: list[re.Pattern] = [
+    re.compile(r"ignore (?:all )?(?:previous|prior|earlier|above) (?:instructions?|directives?|commands?)", re.I),
+    re.compile(r"ignore the (?:user|system|developer)", re.I),
+    re.compile(r"disregard (?:previous|prior|all) (?:instructions?|directives?)", re.I),
+    re.compile(r"system\s*[:\-]\s*(?:override|prompt|admin)", re.I),
+    re.compile(r"\[\s*(?:system|admin|root|developer)\s*\]", re.I),
+    re.compile(r"<\s*system\s*>", re.I),
+    re.compile(r"override (?:safety|policy|rule|guideline|instruction)", re.I),
+    re.compile(r"act as (?:if you (?:are|were)|though you (?:are|were))", re.I),
+    re.compile(r"you (?:are|will be) (?:now |only )?(?:in )?(?:DAN|developer|debug|root|admin) mode", re.I),
+]
+
+# Only check strings at least this long — short strings are very unlikely
+# to host meaningful injection or hidden content, and the false-positive
+# rate goes up sharply on short strings (e.g., "ignore" is fine in
+# general English).
+_MIN_STR_LEN = 30
+
+
 # ── Data classes ────────────────────────────────────────────────────────────
 
 @dataclass
@@ -153,6 +201,10 @@ class ScanResult:
     # Dimension 8 — dependencies
     dependencies: list[str] = field(default_factory=list)
     dep_source: str = ""  # "pyproject.toml" / "requirements.txt" / "(none)"
+
+    # Dimension 9 — string-content safety (tool descriptions, prompts)
+    zero_width_strings: list[CallSite] = field(default_factory=list)
+    injection_pattern_strings: list[CallSite] = field(default_factory=list)
 
 
 # ── AST helpers ─────────────────────────────────────────────────────────────
@@ -359,6 +411,32 @@ class _Scanner(ast.NodeVisitor):
                     self.r.env_reads.setdefault(key, []).append(self._site(node, "os.environ[]"))
         self.generic_visit(node)
 
+    def visit_Constant(self, node: ast.Constant) -> None:
+        # Dimension 9 — string-content safety. Scan every string literal
+        # ≥ _MIN_STR_LEN for zero-width unicode + injection patterns.
+        if isinstance(node.value, str) and len(node.value) >= _MIN_STR_LEN:
+            s = node.value
+            # Zero-width / directional-override unicode
+            if any(ch in s for ch in _ZERO_WIDTH_CHARS):
+                # Note which categories of zero-width chars were found —
+                # bidi-overrides are particularly suspicious vs. mere
+                # zero-width-spaces.
+                bidi = any(ch in s for ch in "‪‫‬‭‮")
+                kind = "bidi-override" if bidi else "zero-width"
+                self.r.zero_width_strings.append(
+                    self._site(node, "<string-literal>", note=f"{kind} chars detected")
+                )
+            # Injection patterns
+            for pat in _INJECTION_PATTERNS:
+                m = pat.search(s)
+                if m:
+                    snippet = s[max(0, m.start() - 10):m.end() + 10].replace("\n", " ")
+                    self.r.injection_pattern_strings.append(
+                        self._site(node, "<string-literal>", note=f"matched: …{snippet}…")
+                    )
+                    break  # one match per string is enough
+        self.generic_visit(node)
+
     @staticmethod
     def _subscript_key(node: ast.Subscript) -> str | None:
         sl = node.slice
@@ -500,6 +578,8 @@ def scan_to_json(target_path: str | Path) -> str:
         "url_construction_warnings": [_call_dict(c) for c in r.url_construction_warnings],
         "dependencies": r.dependencies,
         "dep_source": r.dep_source,
+        "zero_width_strings": [_call_dict(c) for c in r.zero_width_strings],
+        "injection_pattern_strings": [_call_dict(c) for c in r.injection_pattern_strings],
     }
     return json.dumps(payload, indent=2)
 
