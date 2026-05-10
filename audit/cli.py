@@ -61,14 +61,19 @@ def _report_to_dict(report) -> dict:
     """Serialize an AuditReport to a JSON-safe dict including score,
     findings, capabilities, and the underlying scan summary. Preferred
     over `--json` for CI: a script that wants to fail when score < 8 or
-    when any high-severity finding fires can read this output directly."""
+    when any high-severity finding fires can read this output directly.
+
+    Includes total_deduction (uncapped) so consumers can distinguish
+    'barely fails' from 'catastrophic' even when both produce score=0."""
     return {
         "score": report.score,
+        "total_deduction": report.total_deduction,
         "score_explanation": report.score_explanation,
         "capabilities_yes": report.capabilities_yes,
         "capabilities_no":  report.capabilities_no,
         "findings": [
             {
+                "rule_id":   f.rule_id,
                 "dimension": f.dimension,
                 "severity":  f.severity,
                 "title":     f.title,
@@ -76,6 +81,10 @@ def _report_to_dict(report) -> dict:
                 "deduction": f.deduction,
             }
             for f in report.findings
+        ],
+        "suppressions_applied": [
+            {"rule_id": rid, "file": f, "line": ln}
+            for rid, f, ln in report.suppressions_applied
         ],
         "scan_summary": {
             "target_path":   report.scan.target_path,
@@ -86,6 +95,21 @@ def _report_to_dict(report) -> dict:
             "dep_source":    report.scan.dep_source,
         },
     }
+
+
+_SEVERITY_RANK = {"info": 0, "low": 1, "medium": 2, "high": 3}
+
+
+def _exit_code_from_max_severity(report, threshold: str) -> int:
+    """Return non-zero if any finding's severity is >= threshold.
+    Used by `--max-severity` for CI gating ('fail if any finding ≥ medium')."""
+    threshold_rank = _SEVERITY_RANK.get(threshold, -1)
+    if threshold_rank < 0:
+        return 0
+    for f in report.findings:
+        if _SEVERITY_RANK.get(f.severity, 0) >= threshold_rank:
+            return 1
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -132,6 +156,19 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--max-severity",
+        choices=["low", "medium", "high"],
+        default=None,
+        help=(
+            "CI gate: exit non-zero (1) if any finding's severity is "
+            "greater-than-or-equal-to this level. More precise than "
+            "--score-only because suppressed findings won't trip it and "
+            "a single high-severity finding can fail without depending "
+            "on the cumulative score. Combine with --json-report or "
+            "default markdown for the human-readable detail."
+        ),
+    )
+    parser.add_argument(
         "--version",
         action="version",
         version=f"mcp-audit {_get_version()}",
@@ -157,14 +194,20 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.score_only:
             print(report.score)
+            if args.max_severity:
+                return _exit_code_from_max_severity(report, args.max_severity)
             return 0
 
         if args.json_report:
             sys.stdout.write(json.dumps(_report_to_dict(report), indent=2))
             sys.stdout.write("\n")
+            if args.max_severity:
+                return _exit_code_from_max_severity(report, args.max_severity)
             return 0
 
         sys.stdout.write(render_markdown(report, tool_version=_get_version()))
+        if args.max_severity:
+            return _exit_code_from_max_severity(report, args.max_severity)
         return 0
 
     except ValueError as e:

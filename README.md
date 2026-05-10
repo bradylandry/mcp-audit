@@ -72,18 +72,41 @@ mcp-audit /path/to/package --include-tests
 The default output is a markdown report on stdout — pipe to a file
 or pager as you would `git diff`.
 
-### CI integration with `--json-report`
+### CI integration
+
+Use `--max-severity` for one-line gating — exit non-zero if any finding's severity is at or above the threshold (skipping suppressed findings):
 
 ```bash
-SCORE=$(mcp-audit /path --json-report | jq '.score')
-HIGH_FINDINGS=$(mcp-audit /path --json-report | jq '[.findings[] | select(.severity == "high")] | length')
+mcp-audit /path/to/package --max-severity high   # fail CI on any high-severity finding
+mcp-audit /path/to/package --max-severity medium # tighter: any medium or higher
+```
 
-if [ "$SCORE" -lt 8 ]; then
-  echo "Audit score $SCORE below threshold"; exit 1
-fi
-if [ "$HIGH_FINDINGS" -gt 0 ]; then
-  echo "$HIGH_FINDINGS high-severity findings"; exit 1
-fi
+Or read the structured report from `--json-report`:
+
+```bash
+mcp-audit /path --json-report > report.json
+SCORE=$(jq '.score' report.json)
+TOTAL_DEDUCT=$(jq '.total_deduction' report.json)   # uncapped — distinguishes "barely fails" from "catastrophic"
+HIGH=$(jq '[.findings[] | select(.severity == "high")] | length' report.json)
+RULES=$(jq -r '.findings[].rule_id' report.json | sort -u)
+```
+
+Each finding has a stable `rule_id` (e.g. `MCP001` for subprocess, `MCP004` for unsafe deserialization) — see the rule catalog at `audit/findings.py::RuleID`.
+
+### Suppressing findings
+
+When a finding is acknowledged and intentional, suppress it with an inline comment on the offending line:
+
+```python
+subprocess.run(["pg_dump", db_url])  # mcp-audit: ignore MCP001
+```
+
+Suppressed findings appear in the report's "Suppressions applied" section so the acknowledgement is visible — they're not silently dropped.
+
+Multiple rule IDs in one directive:
+
+```python
+some_call()  # mcp-audit: ignore MCP001, MCP006
 ```
 
 ## Example: real-world audit

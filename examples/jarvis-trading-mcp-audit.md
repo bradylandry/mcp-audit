@@ -1,7 +1,7 @@
 # Security Audit: jarvis-trading-mcp
 
-- **Generated:** 2026-05-10 16:40:19 UTC
-- **Tool:** mcp-audit v0.2.0
+- **Generated:** 2026-05-10 17:55:34 UTC
+- **Tool:** mcp-audit v0.3.0
 - **Source:** `/Users/blandry/Documents/Automation/github/jarvis-trading-mcp`
 - **Files scanned:** 2 (413 lines)
 
@@ -35,8 +35,9 @@ From `pyproject.toml`:
 
 ### Low (1)
 
-#### All 1 dep(s) use loose version pins
+#### [MCP011] All 1 dep(s) use loose version pins
 
+- **Rule ID:** `MCP011` (suppress with `# mcp-audit: ignore MCP011` on the offending line)
 - **Dimension:** Dependencies
 - **Severity:** low
 - **Score impact:** −0

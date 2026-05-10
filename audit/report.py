@@ -81,14 +81,30 @@ def render_markdown(r: AuditReport, tool_version: str = "0.1.0") -> str:
             lines.append(f"### {sev_label.capitalize()} ({len(bucket)})")
             lines.append("")
             for f in bucket:
-                lines.append(f"#### {f.title}")
+                lines.append(f"#### [{f.rule_id}] {f.title}")
                 lines.append("")
+                lines.append(f"- **Rule ID:** `{f.rule_id}` (suppress with `# mcp-audit: ignore {f.rule_id}` on the offending line)")
                 lines.append(f"- **Dimension:** {f.dimension}")
                 lines.append(f"- **Severity:** {f.severity}")
                 lines.append(f"- **Score impact:** −{f.deduction}")
                 if f.detail:
                     lines.append(f"- **Detail:** {f.detail}")
                 lines.append("")
+
+    # Suppressions — visible, not silent
+    if r.suppressions_applied:
+        lines.append("## Suppressions applied")
+        lines.append("")
+        lines.append(
+            f"{len(r.suppressions_applied)} call site(s) were suppressed via "
+            f"inline `# mcp-audit: ignore <rule>` directives. They are listed "
+            f"here for transparency — suppressions are visible in the report, "
+            f"not silently dropped."
+        )
+        lines.append("")
+        for rid, fname, ln in r.suppressions_applied:
+            lines.append(f"- `{rid}` at `{fname}:{ln}`")
+        lines.append("")
 
     # Methodology footer
     lines.append("## Scoring methodology")
