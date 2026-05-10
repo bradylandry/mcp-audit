@@ -57,6 +57,7 @@ def build_report(scan: ScanResult) -> AuditReport:
     _check_inbound_network(scan, rep)
     _check_url_safety(scan, rep)
     _check_dependencies(scan, rep)
+    _check_string_content(scan, rep)
 
     _compute_score(rep)
     return rep
@@ -259,6 +260,54 @@ def _check_url_safety(s: ScanResult, r: AuditReport) -> None:
         ),
         deduction=1,
     ))
+
+
+def _check_string_content(s: ScanResult, r: AuditReport) -> None:
+    """Dimension 9 — flag zero-width unicode + prompt-injection patterns
+    inside long string literals. Common targets are MCP tool descriptions,
+    system prompts, or any string that ends up rendered as model context."""
+
+    if s.zero_width_strings:
+        bidi_count = sum(1 for c in s.zero_width_strings if "bidi-override" in c.note)
+        sites = "; ".join(f"{c.file}:{c.line} ({c.note})" for c in s.zero_width_strings[:5])
+        more = "" if len(s.zero_width_strings) <= 5 else f" (+{len(s.zero_width_strings) - 5} more)"
+        # Bidi-override chars are higher severity — they can visually
+        # reverse code, used in real CVEs (e.g., CVE-2021-42574 "Trojan
+        # Source"). Plain zero-width chars are usually a hidden-content
+        # attack vector but lower-severity than bidi inversion.
+        sev: Severity = "high" if bidi_count > 0 else "high"
+        deduct = 3 if bidi_count > 0 else 2
+        r.findings.append(Finding(
+            dimension="String content",
+            severity=sev,
+            title=f"Zero-width / directional unicode in {len(s.zero_width_strings)} string literal(s)",
+            detail=(
+                f"These characters have no legitimate use in tool descriptions "
+                f"or config strings — common vectors for hidden instructions or "
+                f"Trojan Source-style code obfuscation. "
+                f"Sites: {sites}{more}"
+            ),
+            deduction=deduct,
+        ))
+
+    if s.injection_pattern_strings:
+        sites = "; ".join(f"{c.file}:{c.line}" for c in s.injection_pattern_strings[:3])
+        more = "" if len(s.injection_pattern_strings) <= 3 else f" (+{len(s.injection_pattern_strings) - 3} more)"
+        r.findings.append(Finding(
+            dimension="String content",
+            severity="high",
+            title=f"Prompt-injection pattern in {len(s.injection_pattern_strings)} string literal(s)",
+            detail=(
+                f"String literals contain phrases consistent with prompt-injection "
+                f"attempts (e.g., 'ignore previous instructions', '[system]', "
+                f"'override safety'). MCP tool descriptions become Claude's tool "
+                f"context — text-injection here is a real vector. Reviewer should "
+                f"verify each match is legitimate (e.g., a docstring discussing "
+                f"prompt injection vs. an actual injection payload). "
+                f"Sites: {sites}{more}"
+            ),
+            deduction=2,
+        ))
 
 
 def _check_dependencies(s: ScanResult, r: AuditReport) -> None:

@@ -28,6 +28,7 @@ output.
 | **6. Inbound network** | `socket.bind`, `http.server`, `flask.Flask.run`, `fastapi.FastAPI(...)`, `uvicorn.run`, etc. Unusual for an MCP and flagged. |
 | **7. URL construction safety** | URLs built via f-string or string concatenation are flagged as needing manual review (potential injection vector if user data flows in). |
 | **8. Dependencies** | Parses `pyproject.toml` `project.dependencies` or `requirements.txt`. Flags loose pins (no `==`). |
+| **9. String content safety** | Scans every string literal ≥30 chars for zero-width / directional unicode (ZWSP, bidi-override — common Trojan-Source vectors) and prompt-injection patterns (`ignore all previous instructions`, `[system]`, `override safety`, `act as if you are admin`, etc.). Targets MCP tool descriptions where injected text becomes Claude's tool context. |
 
 ## Install
 
