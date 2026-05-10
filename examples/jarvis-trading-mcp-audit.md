@@ -1,9 +1,9 @@
 # Security Audit: jarvis-trading-mcp
 
-- **Generated:** 2026-05-10 16:20:32 UTC
+- **Generated:** 2026-05-10 16:23:14 UTC
 - **Tool:** mcp-audit v0.1.0
 - **Source:** `/Users/blandry/Documents/Automation/github/jarvis-trading-mcp`
-- **Files scanned:** 2 (369 lines)
+- **Files scanned:** 2 (413 lines)
 
 ## Score: 10/10 — low risk
 
@@ -13,7 +13,7 @@
 
 ### What this package CAN do
 - ✅ Outbound HTTPS to: trading.landrycmd.com
-- ✅ Reads env vars: JARVIS_TRADING_API, JARVIS_TRADING_TOKEN (2 distinct)
+- ✅ Reads env vars: JARVIS_TRADING_API, JARVIS_TRADING_MAX_CALLS_PER_MIN, JARVIS_TRADING_TOKEN (3 distinct)
 - ✅ Writes to stdout (2 sites — expected for stdio MCP)
 
 ### What this package does NOT do
