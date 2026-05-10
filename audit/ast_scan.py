@@ -173,6 +173,32 @@ _INJECTION_PATTERNS: list[re.Pattern] = [
 # general English).
 _MIN_STR_LEN = 30
 
+# Inline suppression directive: `# mcp-audit: ignore MCP001`
+# or `# mcp-audit: ignore MCP001, MCP003`. The suppressed rule IDs apply
+# to the call site on the same line. Added 2026-05-10 in response to
+# external auditor's request: maintainers need a way to acknowledge a
+# finding without it disappearing entirely. The match appears in the
+# report's "Suppressed findings" section so suppressions are visible,
+# not silent.
+_SUPPRESS_DIRECTIVE_RE = re.compile(
+    r"#\s*mcp-audit:\s*ignore\s+([A-Z0-9, ]+)",
+    re.I,
+)
+
+
+def _parse_suppression_map(source: str) -> dict[int, frozenset[str]]:
+    """For one .py source string, return {line_number: frozenset of rule IDs}
+    suppressed at that line via inline `# mcp-audit: ignore MCPxxx` comment.
+    Line numbers are 1-indexed to match ast.AST.lineno convention."""
+    out: dict[int, frozenset[str]] = {}
+    for i, line in enumerate(source.splitlines(), start=1):
+        m = _SUPPRESS_DIRECTIVE_RE.search(line)
+        if m:
+            ids = {tok.strip().upper() for tok in m.group(1).split(",") if tok.strip()}
+            if ids:
+                out[i] = frozenset(ids)
+    return out
+
 
 # ── Data classes ────────────────────────────────────────────────────────────
 
@@ -183,6 +209,7 @@ class CallSite:
     line: int
     name: str          # canonical dotted name e.g. "requests.get"
     note: str = ""     # optional inline detail e.g. "verify=False" or "url=f-string"
+    suppressed_rules: frozenset[str] = frozenset()  # rule IDs the source-line directive suppresses
 
 
 @dataclass
@@ -307,13 +334,16 @@ def _hosts_from_string(s: str) -> set[str]:
 class _Scanner(ast.NodeVisitor):
     """Walks one .py file, accumulates findings into `result`."""
 
-    def __init__(self, result: ScanResult, file_path: str):
+    def __init__(self, result: ScanResult, file_path: str, suppression_map: dict[int, frozenset[str]] | None = None):
         self.r = result
         self.file = file_path
+        self.suppression_map = suppression_map or {}
 
     def _site(self, node: ast.AST, name: str, note: str = "") -> CallSite:
         line = getattr(node, "lineno", 0) or 0
-        return CallSite(file=self.file, line=line, name=name, note=note)
+        suppressed = self.suppression_map.get(line, frozenset())
+        return CallSite(file=self.file, line=line, name=name, note=note,
+                        suppressed_rules=suppressed)
 
     def visit_Call(self, node: ast.Call) -> None:
         name = _dotted_name(node.func)
@@ -645,7 +675,8 @@ def scan(target_path: str | Path, include_tests: bool = False) -> ScanResult:
         except SyntaxError:
             continue
         rel = str(py.relative_to(target)) if target.is_dir() else py.name
-        scanner = _Scanner(result, rel)
+        suppression_map = _parse_suppression_map(src)
+        scanner = _Scanner(result, rel, suppression_map=suppression_map)
         scanner.visit(tree)
 
     deps, dep_src = _parse_deps(target if target.is_dir() else target.parent)

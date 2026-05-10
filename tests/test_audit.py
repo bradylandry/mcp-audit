@@ -138,11 +138,14 @@ def _ast_scan_str(src: str, file_name: str = "<test>"):
     """Helper to scan a source-string snippet via the AST visitor.
 
     Bypasses the file-walk; useful for testing one dimension at a time
-    without writing fixture files."""
+    without writing fixture files. Mirrors what scan() does internally:
+    parses inline `# mcp-audit: ignore <rule>` directives so suppression
+    tests can use this helper directly."""
     import ast as _ast
-    from audit.ast_scan import _Scanner, ScanResult
+    from audit.ast_scan import _Scanner, ScanResult, _parse_suppression_map
     result = ScanResult(target_path=file_name)
-    scanner = _Scanner(result, file_name)
+    suppression_map = _parse_suppression_map(src)
+    scanner = _Scanner(result, file_name, suppression_map=suppression_map)
     tree = _ast.parse(src)
     scanner.visit(tree)
     return result
@@ -272,6 +275,133 @@ class TestDynamicExec:
             "obj.eval('something')\n"
         )
         assert r.dynamic_exec_calls == []
+
+
+class TestRuleIDs:
+    """Every Finding must have a stable MCPxxx rule_id (added in v0.3 for
+    suppression + CI gating). Locked in by tests so future refactors can't
+    silently drop the field."""
+
+    def test_every_finding_has_rule_id(self):
+        report = build_report(scan(BAD_FIXTURE))
+        assert report.findings, "bad fixture should produce findings"
+        for f in report.findings:
+            assert f.rule_id, f"finding missing rule_id: {f}"
+            assert f.rule_id.startswith("MCP"), f"unexpected rule_id format: {f.rule_id}"
+            assert len(f.rule_id) >= 6, f"rule_id too short: {f.rule_id}"
+
+    def test_rule_ids_are_unique_per_dimension(self):
+        # No two distinct titles should share a rule_id within the same
+        # AuditReport (sanity — protects against copy-paste reuse mistakes)
+        report = build_report(scan(BAD_FIXTURE))
+        seen = {}
+        for f in report.findings:
+            if f.rule_id in seen:
+                assert seen[f.rule_id] == f.title, (
+                    f"rule_id {f.rule_id} reused with different titles: "
+                    f"{seen[f.rule_id]!r} vs {f.title!r}"
+                )
+            seen[f.rule_id] = f.title
+
+
+class TestInlineSuppression:
+    """`# mcp-audit: ignore MCP00X` directive must remove the matching
+    finding while recording the suppression in the report (visible, not
+    silent — per external auditor's requirement)."""
+
+    def test_suppress_subprocess(self):
+        r = _ast_scan_str(
+            "import subprocess\n"
+            "subprocess.run(['ls'])  # mcp-audit: ignore MCP001\n"
+        )
+        assert len(r.subprocess_calls) == 1
+        assert "MCP001" in r.subprocess_calls[0].suppressed_rules
+        # findings build → finding should NOT appear; suppression IS recorded
+        report = build_report(r)
+        subp_findings = [f for f in report.findings if f.rule_id == "MCP001"]
+        assert subp_findings == []
+        assert any(s[0] == "MCP001" for s in report.suppressions_applied)
+
+    def test_suppress_multiple_rules(self):
+        r = _ast_scan_str(
+            "import requests\n"
+            "requests.get('https://x.com', verify=False)  # mcp-audit: ignore MCP003\n"
+        )
+        assert "MCP003" in r.tls_disabled_calls[0].suppressed_rules
+        report = build_report(r)
+        tls_findings = [f for f in report.findings if f.rule_id == "MCP003"]
+        assert tls_findings == []
+
+    def test_suppress_directive_case_insensitive(self):
+        r = _ast_scan_str(
+            "import subprocess\n"
+            "subprocess.run(['x'])  # MCP-Audit: Ignore mcp001\n"
+        )
+        assert "MCP001" in r.subprocess_calls[0].suppressed_rules
+
+    def test_directive_does_not_match_unrelated_lines(self):
+        r = _ast_scan_str(
+            "import subprocess\n"
+            "subprocess.run(['x'])\n"
+            "# mcp-audit: ignore MCP001 (this is on a different line)\n"
+        )
+        # subprocess.run is on line 2, directive is on line 3 — not suppressed
+        assert r.subprocess_calls[0].suppressed_rules == frozenset()
+
+
+class TestMaxSeverityCli:
+    """--max-severity gating: exit non-zero if any finding ≥ threshold."""
+
+    def test_max_severity_high_passes_on_clean(self):
+        result = subprocess.run(
+            [sys.executable, "-m", "audit.cli", str(CLEAN_FIXTURE), "--max-severity", "high", "--score-only"],
+            capture_output=True, text=True, encoding="utf-8", cwd=REPO_ROOT,
+        )
+        # Clean fixture has no high findings → exit 0
+        assert result.returncode == 0
+
+    def test_max_severity_high_fails_on_bad(self):
+        result = subprocess.run(
+            [sys.executable, "-m", "audit.cli", str(BAD_FIXTURE), "--max-severity", "high", "--score-only"],
+            capture_output=True, text=True, encoding="utf-8", cwd=REPO_ROOT,
+        )
+        # Bad fixture has high findings → exit 1
+        assert result.returncode == 1
+
+    def test_max_severity_low_fails_on_clean(self):
+        # Clean fixture has at least the "loose deps" low finding,
+        # so --max-severity=low should fail (sanity check that the
+        # threshold gating works for all severity levels)
+        result = subprocess.run(
+            [sys.executable, "-m", "audit.cli", str(CLEAN_FIXTURE), "--max-severity", "low", "--score-only"],
+            capture_output=True, text=True, encoding="utf-8", cwd=REPO_ROOT,
+        )
+        assert result.returncode == 1
+
+
+class TestTotalDeduction:
+    """`total_deduction` (uncapped) must be present in the JSON report
+    so CI can distinguish 'barely fails' from 'catastrophic' even when
+    score is floored at 0."""
+
+    def test_total_deduction_in_report(self):
+        report = build_report(scan(BAD_FIXTURE))
+        # Bad fixture has score=0 (capped) but total_deduction should be > 10
+        assert report.score == 0
+        assert report.total_deduction > 10, (
+            f"bad fixture has many high findings — total_deduction should "
+            f"exceed 10, got {report.total_deduction}"
+        )
+
+    def test_total_deduction_in_json_output(self):
+        result = subprocess.run(
+            [sys.executable, "-m", "audit.cli", str(BAD_FIXTURE), "--json-report"],
+            capture_output=True, text=True, encoding="utf-8", cwd=REPO_ROOT,
+        )
+        assert result.returncode == 0
+        data = json.loads(result.stdout)
+        assert "total_deduction" in data
+        assert data["total_deduction"] > data["score"]
 
 
 class TestUnsafeDeserialization:
