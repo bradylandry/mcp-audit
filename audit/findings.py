@@ -58,6 +58,7 @@ def build_report(scan: ScanResult) -> AuditReport:
     _check_url_safety(scan, rep)
     _check_dependencies(scan, rep)
     _check_string_content(scan, rep)
+    _check_unsafe_deserialization(scan, rep)
 
     _compute_score(rep)
     return rep
@@ -293,21 +294,65 @@ def _check_string_content(s: ScanResult, r: AuditReport) -> None:
     if s.injection_pattern_strings:
         sites = "; ".join(f"{c.file}:{c.line}" for c in s.injection_pattern_strings[:3])
         more = "" if len(s.injection_pattern_strings) <= 3 else f" (+{len(s.injection_pattern_strings) - 3} more)"
+        # Detail text deliberately avoids reproducing the regex-matchable
+        # example phrases — otherwise Dimension 9 flags its own diagnostic
+        # message when the audit tool is run on itself (the regex source
+        # `_INJECTION_PATTERNS` list is in ast_scan.py and is the
+        # canonical reference).
         r.findings.append(Finding(
             dimension="String content",
             severity="high",
             title=f"Prompt-injection pattern in {len(s.injection_pattern_strings)} string literal(s)",
             detail=(
-                f"String literals contain phrases consistent with prompt-injection "
-                f"attempts (e.g., 'ignore previous instructions', '[system]', "
-                f"'override safety'). MCP tool descriptions become Claude's tool "
-                f"context — text-injection here is a real vector. Reviewer should "
-                f"verify each match is legitimate (e.g., a docstring discussing "
-                f"prompt injection vs. an actual injection payload). "
+                f"String literals contain phrases consistent with instruction-"
+                f"override attempts. MCP tool descriptions become Claude's tool "
+                f"context — text-injection here is a real vector. The pattern "
+                f"set is defined in audit/ast_scan.py::_INJECTION_PATTERNS. "
+                f"Reviewer should verify each match is legitimate (a docstring "
+                f"that discusses the topic vs. an actual injection payload). "
                 f"Sites: {sites}{more}"
             ),
             deduction=2,
         ))
+
+
+def _check_unsafe_deserialization(s: ScanResult, r: AuditReport) -> None:
+    """Dimension 10 — pickle.load / yaml.load (without SafeLoader) /
+    marshal.loads / dill.loads / cloudpickle.loads / shelve.open.
+
+    All of these execute arbitrary code when handed attacker-controlled
+    bytes. Any MCP that round-trips data via these functions is a
+    privilege-escalation hazard if the upstream source is ever
+    compromised. yaml.load is the canonical example of "looks innocent,
+    is actually ACE." We skip yaml.load when SafeLoader is explicitly
+    passed."""
+    if not s.unsafe_deserialization_calls:
+        r.capabilities_no.append(
+            "No unsafe deserialization (no pickle.load, no yaml.load without "
+            "SafeLoader, no marshal.loads, no dill/cloudpickle)"
+        )
+        return
+
+    sites = "; ".join(
+        f"{c.file}:{c.line} ({c.name})"
+        for c in s.unsafe_deserialization_calls[:5]
+    )
+    more = "" if len(s.unsafe_deserialization_calls) <= 5 else f" (+{len(s.unsafe_deserialization_calls) - 5} more)"
+    r.findings.append(Finding(
+        dimension="Deserialization",
+        severity="high",
+        title=f"Unsafe deserialization sinks ({len(s.unsafe_deserialization_calls)})",
+        detail=(
+            "These functions execute arbitrary code when given attacker-"
+            "controlled input. If the data ever crosses a trust boundary "
+            "(network, IPC, untrusted file), this is remote code execution. "
+            f"Sites: {sites}{more}"
+        ),
+        deduction=3,
+    ))
+    r.capabilities_yes.append(
+        f"Unsafe deserialization ({len(s.unsafe_deserialization_calls)} call sites)"
+    )
 
 
 def _check_dependencies(s: ScanResult, r: AuditReport) -> None:

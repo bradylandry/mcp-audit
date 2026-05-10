@@ -29,6 +29,7 @@ output.
 | **7. URL construction safety** | URLs built via f-string or string concatenation are flagged as needing manual review (potential injection vector if user data flows in). |
 | **8. Dependencies** | Parses `pyproject.toml` `project.dependencies` or `requirements.txt`. Flags loose pins (no `==`). |
 | **9. String content safety** | Scans every string literal ≥30 chars for zero-width / directional unicode (ZWSP, bidi-override — common Trojan-Source vectors) and prompt-injection patterns (`ignore all previous instructions`, `[system]`, `override safety`, `act as if you are admin`, etc.). Targets MCP tool descriptions where injected text becomes Claude's tool context. |
+| **10. Unsafe deserialization** | Flags `pickle.load*`, `marshal.load*`, `yaml.load` (without `Loader=SafeLoader`), `yaml.unsafe_load`, `dill.load*`, `cloudpickle.load*`, `shelve.open` — all of which execute arbitrary code on attacker-controlled input. |
 
 ## Install
 
@@ -53,16 +54,37 @@ mcp-audit /path/to/mcp/package
 # Audit a single file
 mcp-audit /path/to/server.py
 
-# Get just the score (for CI)
+# Get just the score (for CI exit-code thresholds)
 mcp-audit /path/to/package --score-only
-# → prints "8" (or whatever)
+# → prints "10"
 
-# Raw JSON for programmatic consumption
+# Full JSON report (score + findings + capabilities) — RECOMMENDED for CI
+mcp-audit /path/to/package --json-report > report.json
+
+# Raw scan output (AST findings, no scoring) — for debugging
 mcp-audit /path/to/package --json > scan.json
+
+# Include test/fixture/example dirs (excluded by default — they often
+# deliberately violate dimensions and pollute the score)
+mcp-audit /path/to/package --include-tests
 ```
 
 The default output is a markdown report on stdout — pipe to a file
 or pager as you would `git diff`.
+
+### CI integration with `--json-report`
+
+```bash
+SCORE=$(mcp-audit /path --json-report | jq '.score')
+HIGH_FINDINGS=$(mcp-audit /path --json-report | jq '[.findings[] | select(.severity == "high")] | length')
+
+if [ "$SCORE" -lt 8 ]; then
+  echo "Audit score $SCORE below threshold"; exit 1
+fi
+if [ "$HIGH_FINDINGS" -gt 0 ]; then
+  echo "$HIGH_FINDINGS high-severity findings"; exit 1
+fi
+```
 
 ## Example: real-world audit
 
@@ -86,10 +108,12 @@ behavior.
 ## Scoring methodology
 
 Score starts at 10. Each finding deducts a fixed amount based on
-severity:
+severity. The exact deductions are defined as constants in
+[`audit/findings.py`](audit/findings.py) — that's the single source of
+truth this section is rendered from:
 
-- **High** (−2 to −3 each): subprocess with `shell=True`, dynamic exec, TLS verification disabled, suspicious env var reads (AWS/GitHub/OpenAI tokens)
-- **Medium** (−1 to −2 each): subprocess without shell, filesystem writes, inbound network listeners, dynamic URL destinations
+- **High** (−2 to −3 each): subprocess with `shell=True`, dynamic exec (`eval`/`exec`/`compile`/`__import__`), TLS verification disabled, zero-width / bidi-override unicode in string literals, prompt-injection patterns in string literals, unsafe deserialization (`pickle.load*`, `yaml.load` without SafeLoader, `marshal.loads`)
+- **Medium** (−1 to −2 each): subprocess without shell, filesystem writes, inbound network listeners, dynamic URL destinations, broad-credential env var reads (AWS/GitHub/OpenAI tokens)
 - **Low** (0 to −1 each): URL constructed via f-string/concat, multiple outbound hosts, loose version pins
 - **Info** (no deduction): observed behavior worth noting (e.g., reads from filesystem)
 
