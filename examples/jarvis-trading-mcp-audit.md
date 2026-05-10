@@ -1,7 +1,7 @@
 # Security Audit: jarvis-trading-mcp
 
-- **Generated:** 2026-05-10 16:39:58 UTC
-- **Tool:** mcp-audit v0.1.0
+- **Generated:** 2026-05-10 16:40:19 UTC
+- **Tool:** mcp-audit v0.2.0
 - **Source:** `/Users/blandry/Documents/Automation/github/jarvis-trading-mcp`
 - **Files scanned:** 2 (413 lines)
 
