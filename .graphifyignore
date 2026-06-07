@@ -30,3 +30,5 @@ graphify-out/.graphify_uncached.txt
 graphify-out/.graphify_chunk_*.json
 graphify-out/.needs_update
 graphify-out/needs_update
+
+graphify-out/

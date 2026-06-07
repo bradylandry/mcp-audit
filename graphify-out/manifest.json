@@ -1,0 +1,57 @@
+{
+  "audit/__init__.py": {
+    "mtime": 1779924380.878185,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": ""
+  },
+  "audit/ast_scan.py": {
+    "mtime": 1779924380.878358,
+    "ast_hash": "dbed3eea3f4592e8baf7316f52a344ab",
+    "semantic_hash": ""
+  },
+  "audit/cli.py": {
+    "mtime": 1779924380.8784878,
+    "ast_hash": "43f09a0c5740436e4e76283fbda6cb9d",
+    "semantic_hash": ""
+  },
+  "audit/findings.py": {
+    "mtime": 1779924380.8785903,
+    "ast_hash": "2b0d7800ac64eccfff0f7ec7fb341472",
+    "semantic_hash": ""
+  },
+  "audit/report.py": {
+    "mtime": 1779924380.8787,
+    "ast_hash": "9050c97bbcc6e55d0c7ca63214e5cd21",
+    "semantic_hash": ""
+  },
+  "tests/__init__.py": {
+    "mtime": 1779924380.8788948,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": ""
+  },
+  "tests/fixtures/bad_mcp/server.py": {
+    "mtime": 1779924380.8790598,
+    "ast_hash": "2b2b3f040ea3c76463320c5769d990ee",
+    "semantic_hash": ""
+  },
+  "tests/fixtures/clean_mcp/server.py": {
+    "mtime": 1779924380.8791773,
+    "ast_hash": "c3fa94d89a9b8c30feb354304f18a37f",
+    "semantic_hash": ""
+  },
+  "tests/test_audit.py": {
+    "mtime": 1779924380.8792512,
+    "ast_hash": "2b12eac438e4d8a3f29ed84d50816c09",
+    "semantic_hash": ""
+  },
+  "README.md": {
+    "mtime": 1779924380.8781261,
+    "ast_hash": "d179ebe21167d336dd4616edfdf760e6",
+    "semantic_hash": ""
+  },
+  "examples/jarvis-trading-mcp-audit.md": {
+    "mtime": 1779924380.8787982,
+    "ast_hash": "0b979e606d454ec206021169314ec450",
+    "semantic_hash": ""
+  }
+}
