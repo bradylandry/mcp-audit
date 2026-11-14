@@ -391,6 +391,17 @@ class TestMaxSeverityCli:
         assert "files_scanned" in payload
 
 
+    def test_max_severity_high_passes_on_clean_with_json(self):
+        result = subprocess.run(
+            [sys.executable, "-m", "audit.cli", str(CLEAN_FIXTURE), "--json", "--max-severity", "high"],
+            capture_output=True, text=True, encoding="utf-8", cwd=REPO_ROOT,
+        )
+        assert result.returncode == 0
+        payload = json.loads(result.stdout)
+        assert "score" not in payload
+        assert "files_scanned" in payload
+
+
 class TestTotalDeduction:
     """`total_deduction` (uncapped) must be present in the JSON report
     so CI can distinguish 'barely fails' from 'catastrophic' even when
