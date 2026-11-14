@@ -79,6 +79,8 @@ Use `--max-severity` for one-line gating — exit non-zero if any finding's seve
 ```bash
 mcp-audit /path/to/package --max-severity high   # fail CI on any high-severity finding
 mcp-audit /path/to/package --max-severity medium # tighter: any medium or higher
+# --json still prints the raw scan. --max-severity still sets the exit code.
+mcp-audit /path/to/package --json --max-severity high
 ```
 
 Or read the structured report from `--json-report`:
