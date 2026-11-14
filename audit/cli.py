@@ -188,6 +188,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.json:
             sys.stdout.write(scan_to_json(target, include_tests=args.include_tests))
             sys.stdout.write("\n")
+            if args.max_severity:
+                report = build_report(scan_result)
+                return _exit_code_from_max_severity(report, args.max_severity)
             return 0
 
         report = build_report(scan_result)

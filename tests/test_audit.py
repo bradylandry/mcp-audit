@@ -378,6 +378,18 @@ class TestMaxSeverityCli:
         )
         assert result.returncode == 1
 
+    def test_max_severity_high_fails_on_bad_with_json(self):
+        # --json used to return 0 before the report was built, so the
+        # gate never ran. The stdout must still be the raw scan JSON.
+        result = subprocess.run(
+            [sys.executable, "-m", "audit.cli", str(BAD_FIXTURE), "--json", "--max-severity", "high"],
+            capture_output=True, text=True, encoding="utf-8", cwd=REPO_ROOT,
+        )
+        assert result.returncode == 1
+        payload = json.loads(result.stdout)
+        assert "score" not in payload
+        assert "files_scanned" in payload
+
 
 class TestTotalDeduction:
     """`total_deduction` (uncapped) must be present in the JSON report
