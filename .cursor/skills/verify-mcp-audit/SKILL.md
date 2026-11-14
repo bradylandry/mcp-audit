@@ -12,7 +12,7 @@ The two shipped fixtures are the official targets:
 - `tests/fixtures/clean_mcp` must score at least 8
 - `tests/fixtures/bad_mcp` must score 0 and include the high-risk findings
 
-Never point this skill at a live MCP deployment or at Brady's production packages unless a later feature explicitly says so. The default drive stays on fixtures.
+Every drive target is `tests/fixtures/bad_mcp` or `tests/fixtures/clean_mcp`. Do not point this skill at a live MCP deployment or at any production package.
 
 Isolation: each drive is a short-lived CLI process. Two runs can share the same checkout. Do not write into the fixtures. Put reports under `$EVIDENCE_DIR`. Never kill a process by name.
 
@@ -44,7 +44,7 @@ Doctor exits 0 and prints `doctor: usable` when `.venv/bin/python -m audit.cli -
 
 ## Drive
 
-The harness is the CLI itself (`python -m audit.cli`). Drive the mapped feature `bad-fixture` first. Commands live in that feature file.
+The harness is the CLI itself (`python -m audit.cli`). Drive both mapped features `bad-fixture` and `clean-fixture`. Commands live in those feature files. The default prove run must include both.
 
 ## Evidence
 
@@ -53,7 +53,7 @@ Store proof under `$EVIDENCE_DIR`. Capture:
 - `doctor.txt`
 - `bad-score.txt` (a single integer, must be `0`)
 - `bad-report.json` from `--json-report`
-- `clean-score.txt` (integer >= 8) when that feature is also driven
+- `clean-score.txt` (integer >= 8)
 
 Proof standards: run the real CLI on the shipped fixtures, not an imported helper alone. Confirm the score and at least one expected finding in the JSON report. Cleanup must not delete `$EVIDENCE_DIR`.
 
@@ -64,7 +64,7 @@ set -euo pipefail
 bash .cursor/skills/verify-mcp-audit/helpers/cleanup.sh
 ```
 
-No server is started. Cleanup only removes scratch files the helpers may have written under `/tmp/verify-mcp-audit-scratch*` and leaves `$EVIDENCE_DIR` and `.venv` in place.
+No server is started. Cleanup does not delete `$EVIDENCE_DIR` or `.venv`. No scratch directories are created, so cleanup is a no-op besides that confirmation.
 
 ## Helpers
 
