@@ -10,15 +10,15 @@
 ## How to get to it (user POV)
 
 ```bash
-python -m audit.cli tests/fixtures/clean_mcp --json-report > report.json
+python -m audit.cli tests/fixtures/clean_mcp --json-report > "$EVIDENCE_DIR/report.json"
 ```
 
 ## Driving it with the CLI
 
 ```bash
 set -euo pipefail
-.venv/bin/python -m audit.cli tests/fixtures/clean_mcp --json-report | tee "$EVIDENCE_DIR/clean-report.json"
-.venv/bin/python -c "import json,os; r=json.load(open(os.environ['EVIDENCE_DIR']+'/clean-report.json')); assert 'score' in r and 'findings' in r and 'scan_summary' in r; print('json-report keys ok')"
+python3 -m audit.cli tests/fixtures/clean_mcp --json-report | tee "$EVIDENCE_DIR/clean-report.json"
+python3 -c "import json,os; r=json.load(open(os.environ['EVIDENCE_DIR']+'/clean-report.json')); assert 'score' in r and 'findings' in r and 'scan_summary' in r; print('json-report keys ok')"
 ```
 
 ## Gotchas

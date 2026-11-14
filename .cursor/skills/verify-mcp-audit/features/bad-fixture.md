@@ -25,7 +25,7 @@ After Launch and a passing Doctor:
 
 ```bash
 set -euo pipefail
-PY=".venv/bin/python"
+PY="python3"
 
 "$PY" -m audit.cli tests/fixtures/bad_mcp --score-only | tee "$EVIDENCE_DIR/bad-score.txt"
 test "$(tr -d '[:space:]' < "$EVIDENCE_DIR/bad-score.txt")" = "0"
@@ -41,7 +41,9 @@ assert rep["score"] == 0, rep["score"]
 titles = [f["title"] for f in rep["findings"]]
 assert any("Subprocess" in t for t in titles), titles
 assert any("Dynamic code execution" in t for t in titles), titles
-print("bad-fixture: score 0 with expected findings")
+assert any(f.get("rule_id")=="MCP003" and f.get("severity")=="high" for f in rep["findings"]), titles
+assert sum(f.get("severity")=="high" for f in rep["findings"]) >= 3, titles
+print("bad-fixture: score 0 with expected findings including TLS")
 PY
 ```
 

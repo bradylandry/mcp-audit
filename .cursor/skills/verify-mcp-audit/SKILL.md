@@ -27,7 +27,7 @@ mkdir -p "$EVIDENCE_DIR"
 bash .cursor/skills/verify-mcp-audit/helpers/launch.sh
 ```
 
-`helpers/launch.sh` creates `.venv` if needed and installs `.[test]`. Readiness is Doctor printing `doctor: usable`.
+`helpers/launch.sh` checks that `python3` can import `audit.cli` from the repo root. It does not pip-install. Readiness is Doctor printing `doctor: usable`.
 
 Teardown: Cleanup. The venv may be left in the checkout (it is gitignored). Cleanup does not delete evidence.
 
@@ -40,7 +40,7 @@ set -euo pipefail
 bash .cursor/skills/verify-mcp-audit/helpers/doctor.sh | tee "$EVIDENCE_DIR/doctor.txt"
 ```
 
-Doctor exits 0 and prints `doctor: usable` when `.venv/bin/python -m audit.cli --help` exits 0, the help text mentions `--json-report` and `--score-only`, and both fixture directories exist. Otherwise it prints `doctor: NOT usable` and exits 1.
+Doctor exits 0 and prints `doctor: usable` when `python3 -m audit.cli --help` exits 0, the help text mentions `--json-report` and `--score-only`, and both fixture directories exist. Otherwise it prints `doctor: NOT usable` and exits 1.
 
 ## Drive
 
@@ -54,6 +54,7 @@ Store proof under `$EVIDENCE_DIR`. Capture:
 - `bad-score.txt` (a single integer, must be `0`)
 - `bad-report.json` from `--json-report`
 - `clean-score.txt` (integer >= 8)
+- `clean-report.json` from `--json-report`
 
 Proof standards: run the real CLI on the shipped fixtures, not an imported helper alone. Confirm the score and at least one expected finding in the JSON report. Cleanup must not delete `$EVIDENCE_DIR`.
 

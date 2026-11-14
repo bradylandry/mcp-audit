@@ -17,7 +17,7 @@ python -m audit.cli tests/fixtures/bad_mcp --score-only
 
 ```bash
 set -euo pipefail
-.venv/bin/python -m audit.cli tests/fixtures/bad_mcp --score-only | tee "$EVIDENCE_DIR/score-only.txt"
+python3 -m audit.cli tests/fixtures/bad_mcp --score-only | tee "$EVIDENCE_DIR/score-only.txt"
 test "$(tr -d '[:space:]' < "$EVIDENCE_DIR/score-only.txt")" = "0"
 ```
 
