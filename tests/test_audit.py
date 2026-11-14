@@ -23,13 +23,14 @@ dependencies.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
-from audit.ast_scan import scan, scan_to_json
+from audit.ast_scan import scan, scan_result_to_json, scan_to_json
 from audit.findings import build_report
 from audit.report import render_markdown
 
@@ -390,7 +391,6 @@ class TestMaxSeverityCli:
         assert "score" not in payload
         assert "files_scanned" in payload
 
-
     def test_max_severity_high_passes_on_clean_with_json(self):
         result = subprocess.run(
             [sys.executable, "-m", "audit.cli", str(CLEAN_FIXTURE), "--json", "--max-severity", "high"],
@@ -400,6 +400,53 @@ class TestMaxSeverityCli:
         payload = json.loads(result.stdout)
         assert "score" not in payload
         assert "files_scanned" in payload
+
+    def test_json_and_gate_share_one_scan(self, monkeypatch, capsys):
+        # A second walk can see a different tree than the scan the gate
+        # scored. --json must print that same ScanResult.
+        import audit.ast_scan as ast_scan
+        import audit.cli as cli
+
+        calls = {"n": 0, "result": None}
+        real_scan = ast_scan.scan
+
+        def counting_scan(target_path, include_tests=False):
+            calls["n"] += 1
+            result = real_scan(target_path, include_tests=include_tests)
+            if calls["n"] > 1:
+                result.files_scanned = -1
+            calls["result"] = result
+            return result
+
+        monkeypatch.setattr(ast_scan, "scan", counting_scan)
+        monkeypatch.setattr(cli, "scan", counting_scan)
+
+        code = cli.main([str(BAD_FIXTURE), "--json", "--max-severity", "high"])
+        out = capsys.readouterr().out
+        assert code == 1
+        assert calls["n"] == 1
+        payload = json.loads(out)
+        assert payload["files_scanned"] == calls["result"].files_scanned
+        assert payload["files_scanned"] > 0
+        assert "score" not in payload
+        assert out == scan_result_to_json(calls["result"]) + "\n"
+
+    def test_scan_to_json_wraps_scan_result_to_json(self):
+        scanned = scan(BAD_FIXTURE)
+        assert scan_to_json(BAD_FIXTURE) == scan_result_to_json(scanned)
+
+    def test_help_says_json_respects_max_severity(self):
+        result = subprocess.run(
+            [sys.executable, "-m", "audit.cli", "--help"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            cwd=REPO_ROOT,
+            env={**os.environ, "COLUMNS": "200"},
+        )
+        assert result.returncode == 0
+        assert "--max-severity still controls the exit code" in result.stdout
+        assert "Combine with --json, --json-report, or" in result.stdout
 
 
 class TestTotalDeduction:

@@ -686,9 +686,8 @@ def scan(target_path: str | Path, include_tests: bool = False) -> ScanResult:
     return result
 
 
-def scan_to_json(target_path: str | Path, include_tests: bool = False) -> str:
-    """Convenience: scan + dump as JSON."""
-    r = scan(target_path, include_tests=include_tests)
+def scan_result_to_json(r: ScanResult) -> str:
+    """Dump one ScanResult as JSON. Does not scan again."""
     payload = {
         "target_path": r.target_path,
         "files_scanned": r.files_scanned,
@@ -713,6 +712,11 @@ def scan_to_json(target_path: str | Path, include_tests: bool = False) -> str:
         "unsafe_deserialization_calls": [_call_dict(c) for c in r.unsafe_deserialization_calls],
     }
     return json.dumps(payload, indent=2)
+
+
+def scan_to_json(target_path: str | Path, include_tests: bool = False) -> str:
+    """Convenience: scan + dump as JSON."""
+    return scan_result_to_json(scan(target_path, include_tests=include_tests))
 
 
 def _call_dict(c: CallSite) -> dict:

@@ -13,7 +13,8 @@ or pager as you would `git diff`.
 
 Output modes:
   default    : markdown report
-  --json     : raw scan results (the AST findings, no scoring)
+  --json     : raw scan results (the AST findings, no scoring).
+               --max-severity still controls the exit code
   --json-report : full audit report including score, findings, severities,
                   capabilities — the right thing for CI / programmatic use
   --score-only : a single integer 0-10
@@ -27,7 +28,7 @@ import sys
 from dataclasses import asdict
 from pathlib import Path
 
-from audit.ast_scan import scan, scan_to_json
+from audit.ast_scan import scan, scan_result_to_json
 from audit.findings import build_report, Finding
 from audit.report import render_markdown
 
@@ -132,7 +133,10 @@ def main(argv: list[str] | None = None) -> int:
     out.add_argument(
         "--json",
         action="store_true",
-        help="Emit raw scan results as JSON (AST findings, no scoring or severity)",
+        help=(
+            "Emit raw scan results as JSON (AST findings, no scoring or severity). "
+            "--max-severity still controls the exit code"
+        ),
     )
     out.add_argument(
         "--json-report",
@@ -164,7 +168,7 @@ def main(argv: list[str] | None = None) -> int:
             "greater-than-or-equal-to this level. More precise than "
             "--score-only because suppressed findings won't trip it and "
             "a single high-severity finding can fail without depending "
-            "on the cumulative score. Combine with --json-report or "
+            "on the cumulative score. Combine with --json, --json-report, or "
             "default markdown for the human-readable detail."
         ),
     )
@@ -186,7 +190,7 @@ def main(argv: list[str] | None = None) -> int:
         scan_result = scan(target, include_tests=args.include_tests)
 
         if args.json:
-            sys.stdout.write(scan_to_json(target, include_tests=args.include_tests))
+            sys.stdout.write(scan_result_to_json(scan_result))
             sys.stdout.write("\n")
             if args.max_severity:
                 report = build_report(scan_result)
